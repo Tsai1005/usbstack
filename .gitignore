@@ -1,0 +1,30 @@
+#Object file
+*.o
+*.d
+*.ko
+*.obj
+*.elf
+
+#Libraries
+*.lib
+#*.a
+*.la
+*.lo
+
+#Executables
+#*.exe
+*out
+*.app
+*.hex
+*.bin
+*.lst
+*.or32
+
+#vim database
+tags
+filenametags
+
+#others
+*.txt
+*.rar
+*.swp
