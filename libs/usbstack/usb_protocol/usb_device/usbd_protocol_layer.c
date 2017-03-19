@@ -64,26 +64,33 @@ static void tx_probe_packet_handler(struct usb_pipe *pipe, const struct usb_tx *
 {
     struct usb_tx *pkt;
 
-    if (pipe->data_len == 0) {
-        return;
-    }
-    if (lbuf_empty(pipe->lbuf)) {
-        return;
-    }
-
-    pkt = lbuf_pop(pipe->lbuf);
-    if (pkt) {
-        __usbd_drv->send_packet(pipe, pkt->payload, pkt->size);
-        pipe->data_len -= pkt->size;
+    if (pipe->data_len)
+    {
+        pipe->data_len -= pkt->maxpktsize;
         if (pipe->data_len == 0) {
             pipe->send_ok = 1;
             thread_resume(&__this->protocol_thread);
         }
     }
+
+    //send remain packet
+    pkt = lbuf_pop(pipe->lbuf);
+    if (pkt) {
+        __usbd_drv->send_packet(pipe, pkt->payload, pkt->size);
+    }
 }
+
+static void ep0_send_respond
 
 static void ep0_probe_packet_handler(void *priv, struct usb_pipe *pipe, const struct usb_rx *rx)
 {
+    switch(pipe->transfer_state)
+    {
+    case USB_EP0_STALL:
+    case USB_EP0_SETUPEND:
+        pipe->state = EP0_SETUP_ST;
+        return;
+    }
     switch (pipe->state) {
     case EP0_SETUP_ST:
     case EP0_DATA_OUT_ST:
@@ -110,6 +117,7 @@ static void __get_status(struct usb_pipe *pipe, const struct usb_ctrlrequest *se
     }
     respond = SELF_POWERED;
 
+    __usbd_drv->send_packet(pipe, __this->app_usb_desc_device, *__this->app_usb_desc_device);
 }
 
 
@@ -144,6 +152,7 @@ static void ep0_setup_process(struct usb_pipe *pipe, const struct usb_rx *pkt)
 {
     struct usb_ctrlrequest *setup = (struct usb_ctrlrequest *)pkt->payload;
 
+    //notify upper layer process
     if ((setup->bRequestType & USB_TYPE_MASK) == USB_STANDARD_REQUEST) {
         pipe->handler(USB_STANDARD_REQUEST_PACKET, pipe->endpoint, setup, sizeof(struct usb_ctrlrequest));
         return;
@@ -217,8 +226,15 @@ static void rx_post_packet_handler(struct usb_pipe *pipe)
     }
 }
 
+static void usbstack_event_
+
 static void tx_post_packet_handler(struct usb_pipe *pipe)
 {
+    if (pipe->send_ok)
+    {
+
+        pipe->handler(USB_EVENT_PACKET, pipe->end)
+    }
 }
 
 
@@ -312,16 +328,20 @@ void usbd_pipe_open(u8 index, const struct usb_pipe *pipe, usbstack_packet_handl
     pipe_temp->handler = packet_handler;
 }
 
+static void usbd_pipe_send_packet_start()
+{
+    
+}
+
 void usbd_pipe_send_packet(struct usb_pipe *pipe, u8 *packet, u16 size)
 {
     struct usb_tx *tx;
+    u16 len, remain;
 
     pipe->data_len = size;
     pipe->wait_ok = 0;
 
     while (size) {
-        u16 len;
-
         len = (size > pipe->maxpktsize) ? pipe->maxpktsize : size;
 
         pkt = lbuf_alloc(pipe->lbuf, sizeof(*pkt) + pipe->maxpktsize)
@@ -335,8 +355,14 @@ void usbd_pipe_send_packet(struct usb_pipe *pipe, u8 *packet, u16 size)
         size -= len;
         packet += len;
     }
-    tx_probe_packet_handler(pipe, NULL);
+
+    //start send
+    pkt = lbuf_pop(pipe->lbuf);
+    if (pkt) {
+        __usbd_drv->send_packet(pipe, pkt->payload, pkt->size);
+    }
 }
+
 
 void usbd_pipe_send_packet_wait(struct usb_pipe *pipe, u8 *packet, u16 size)
 {

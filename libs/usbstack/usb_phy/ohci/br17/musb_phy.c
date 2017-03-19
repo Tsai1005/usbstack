@@ -158,19 +158,17 @@ static void musb_ep0_process(struct usb_phy *phy)
         pipe = phy->endpoint0.pipe;
         csr0 = __musb_read_reg_csr0(musb);
         if (csr0 & CSR0P_SentStall) {
-            pipe-> = MUSB_EP0_STALL;
+            pipe->transfer_state = USB_EP0_STALL;
         }
         if (csr0 & CSR0P_SetupEnd) {
-            pipe-> = MUSB_EP0_SETUPEND;
+            pipe->transfer_state = USB_EP0_SETUPEND;
         }
         if (csr0 & CSR0H_RxPktRdy) {
-            pipe-> = MUSB_EP0_RX;
+            pkt->size = __musb_read_reg_count0(musb);
+            pkt->payload = phy->endpoint0.dma_buf;
         }
 
-        pkt->size = __musb_read_reg_count0(musb);
-        pkt->payload = phy->endpoint0.dma_buf;
-
-        if (phy->probe_handler && phy->probe_handler->rx_handler) {
+        if (phy->probe_handler && phy->probe_handler->ep0_handler) {
             phy->probe_handler->ep0_handler(phy->priv, pipe, pkt);
         }
     }

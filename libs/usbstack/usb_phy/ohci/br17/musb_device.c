@@ -98,119 +98,98 @@ static void musb_hw_endpoint_open(struct usb_phy *phy, struct usb_pipe *pipe)
 
     musb_hw_endpoint_init(phy, pipe):
 
-        endpoint = pipe->endpoint;
+    endpoint = pipe->endpoint;
 
-        __alloc_endpoint_memory(endpoint);
+    __alloc_endpoint_memory(endpoint);
 
-        if (endpoint->number) {
-        if (endpoint->direction) {
-            __musb_tx_endpoint_init(musb, endpoint);
-        } else {
-            __musb_rx_endpoint_init(musb, endpoint);
-        }
+    if (endpoint->number) {
+    if (endpoint->direction) {
+        __musb_tx_endpoint_init(musb, endpoint);
+    } else {
+        __musb_rx_endpoint_init(musb, endpoint);
     }
+}
 
-    static void musb_rx_endpoint0_process(struct usb_phy * phy, struct usb_pipe * pipe) {
-        u8 csr0;
 
-        csr0 = __musb_read_reg(musb, MUSB_CSR0)
+static void __musb_ep0_tx_flush(JL_USB_TypeDef * musb, struct usb_endpoint * endpoint, u16 size) {
+    u8 csr0 = __musb_read_reg_csr0(musb);
 
-        if (csr0 & CSR0P_SentStall) {
-            __musb_write
-        }
-
-        struct usb_rx *pkt;
-        struct usb_pipe *pipe;
-
-        pkt->size = __musb_read_reg(musb, MUSB_COUNT0);
-        pkt->payload = phy->endpoint0.dma_buf;
-        pipe = phy->endpoint0.pipe;
+    if (csr0 & CSR0P_TxPktRdy) {
+        debug_info("CSR0 under run\n");
+        return;
     }
-
-
-
-    static void __musb_ep0_tx_flush(JL_USB_TypeDef * musb, struct usb_endpoint * endpoint, u16 size) {
-        u8 csr0 = __musb_read_reg_csr0(musb);
-
-        if (csr0 & CSR0P_TxPktRdy) {
-            debug_info("CSR0 under run\n");
-            return;
-        }
-        musb->EP0_CNT = size;
-        if (size < endpoint->size) {
-            __musbd_csr0_tx_end(musb);
-        } else {
-            __musbd_csr0_tx(musb);
-        }
+    musb->EP0_CNT = size;
+    if (size < endpoint->size) {
+        __musbd_csr0_tx_end(musb);
+    } else {
+        __musbd_csr0_tx(musb);
     }
+}
 
-    static void __musb_ep_tx_flush(JL_USB_TypeDef * musb, struct usb_endpoint * endpoint, u16 size) {
-        u32 *base = musb->EP0_CNT;
+static void __musb_ep_tx_flush(JL_USB_TypeDef * musb, struct usb_endpoint * endpoint, u16 size) {
+    u32 *base = musb->EP0_CNT;
 
-        *(base + i) = size;
+    *(base + i) = size;
 
-        __musb_write_reg_index(endpoint->number);
+    __musb_write_reg_index(endpoint->number);
 
-        __musb_write_reg_txcsr(TXCSR1P_TxPktRdy);
+    __musb_write_reg_txcsr(TXCSR1P_TxPktRdy);
+}
+
+static void musb_send_packet(struct usb_pipe * pipe, u8 * packet, u16 size) {
+    struct usb_endpoint *endpoint;
+
+    endpoint = pipe->endpoint;
+
+    memcpy(endpoint->dma_buf, packet, size);
+
+    JL_USB_TypeDef *musb;
+
+    musb = pipe->phy->sfrs;
+
+    if (endpoint->number == 0) {
+        __musb_ep0_tx_flush(musb, endpoint, size);
+    } else {
+        __musb_ep_tx_flush(musb, endpoint, size);
     }
+}
 
-    static void musb_send_packet(struct usb_pipe * pipe, u8 * packet, u16 size) {
-        struct usb_endpoint *endpoint;
 
-        endpoint = pipe->endpoint;
+static void __musb_phy_device_init(JL_USB_TypeDef * musb) {
+    musb->CON0 &= ~BIT(9); //关闭比较器
 
-        memcpy(endpoint->dma_buf, packet, size);
+    musb->CON0 &= 0xffff00;
+    musb->CON1 = 0x00;
 
+    musb->CON0 |= BIT(0);				//[4]:PHY_ON 使能USB_PHY
+
+    musb->IO_CON &= ~(BIT(4) | BIT(5)); //DP & DM pull down disable
+    musb->IO_CON |= (BIT(6) | BIT(7));  //DP & DM pull up enable
+
+    musb->CON0 |= (BIT(4) | BIT(3) | BIT(5) | BIT(2));	//[4]:CID  [3]:TM1 [5]:VBUS	 [2]:JL_USB->NRST
+}
+static void ep0_packet_handler(void *,) {
+
+}
+
+static void *musbd_hw_init(u8 index, void *priv, const struct usb_phy_handler * handler) {
+    struct usb_phy *phy
         JL_USB_TypeDef *musb;
 
-        musb = pipe->phy->sfrs;
+    phy = musb_hw_init(index, USB_ROLE_DEVICE);
 
-        if (endpoint->number == 0) {
-            __musb_ep0_tx_flush(musb, endpoint, size);
-        } else {
-            __musb_ep_tx_flush(musb, endpoint, size);
-        }
-    }
+    __musb_phy_device_init(musb);
 
+    musb_register_packet_handler(phy, priv, handler);
 
-    static void __musb_phy_device_init(JL_USB_TypeDef * musb) {
-        musb->CON0 &= ~BIT(9); //关闭比较器
+    return phy;
+}
 
-        musb->CON0 &= 0xffff00;
-        musb->CON1 = 0x00;
-
-        musb->CON0 |= BIT(0);				//[4]:PHY_ON 使能USB_PHY
-
-        musb->IO_CON &= ~(BIT(4) | BIT(5)); //DP & DM pull down disable
-        musb->IO_CON |= (BIT(6) | BIT(7));  //DP & DM pull up enable
-
-        musb->CON0 |= (BIT(4) | BIT(3) | BIT(5) | BIT(2));	//[4]:CID  [3]:TM1 [5]:VBUS	 [2]:JL_USB->NRST
-    }
-    static void ep0_packet_handler(void *,) {
-
-    }
-
-    static void *musbd_hw_init(u8 index, void *priv, const struct usb_phy_handler * handler) {
-        struct usb_phy *phy
-            JL_USB_TypeDef *musb;
-
-        phy = musb_hw_init(index, USB_ROLE_DEVICE);
-
-        __musb_phy_device_init(musb);
-
-        musb_register_packet_handler(phy, priv, handler);
-
-        return phy;
-    }
-
-    static const struct usb_driver musbd_drv = {
-        .init                   = musb_hw_init,
-        .open                   = musb_hw_endpoint_open;
-
-        .send_packet            = musb_send_packet,
-
-        .request_packet         = musb_request_packet,
-
-        .ioctrl                 = musb_ioctrl,
-    };
-    REGISTER_USB_DEVICE_OPERATION(musb_drv);
+static const struct usb_driver musbd_drv = {
+    .init                   = musb_hw_init,
+    .open                   = musb_hw_endpoint_open;
+    .send_packet            = musb_send_packet,
+    .request_packet         = musb_request_packet,
+    .ioctrl                 = musb_ioctrl,
+};
+REGISTER_USB_DEVICE_OPERATION(musb_drv);
